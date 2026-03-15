@@ -511,6 +511,110 @@ def oauth_guest():
         "author_uid": author_uid
     })
 
+# -----------------------------
+# Join Guild Functions
+# -----------------------------
+
+def create_join_guild_protobuf(guild_id):
+    """Create protobuf message for joining guild"""
+    # Simple protobuf structure for join guild request
+    # Field 1: guild_id (varint)
+    # Field 2: region (string) - optional
+    # Field 3: request_type (varint) - 1 for join request
+    
+    message = uid_generator_pb2.uid_generator()
+    message.saturn_ = int(guild_id)
+    message.garena = 1
+    return message.SerializeToString()
+
+@retry_operation(max_retries=10, delay=1)
+def join_guild_with_retry(author_uid, guild_id, token, server_name=None):
+    """Join guild with retry mechanism"""
+    try:
+        if not server_name:
+            server_name = get_server_from_token(token)
+
+        # Get player info first
+        player_info = get_player_info(author_uid, token, server_name)
+        
+        # Create protobuf for join guild
+        protobuf_data = create_join_guild_protobuf(guild_id)
+        encrypted_data = encrypt_message_hex(protobuf_data)
+        
+        endpoint = get_base_url(server_name) + "RequestJoinClan"
+        
+        headers = {
+            'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_Z01QD Build/PI)",
+            'Connection': "Keep-Alive",
+            'Accept-Encoding': "gzip",
+            'Authorization': f"Bearer {token}",
+            'Content-Type': "application/x-www-form-urlencoded",
+            'Expect': "100-continue",
+            'X-Unity-Version': "2018.4.11f1",
+            'X-GA': "v1 1",
+            'ReleaseVersion': "OB52"
+        }
+        
+        response = requests.post(endpoint, data=bytes.fromhex(encrypted_data), headers=headers, verify=False)
+        
+        # Extract player info
+        player_data = None
+        if player_info:
+            player_data = extract_player_info(player_info)
+        
+        # Check if successful
+        if response.status_code == 200:
+            status = "success"
+        else:
+            status = "failed"
+            raise Exception(f"HTTP {response.status_code}: {response.text}")
+        
+        # Response data
+        response_data = {
+            "your_uid": author_uid,
+            "nickname": player_data.get('nickname') if player_data else "Unknown",
+            "guild_id": guild_id,
+            "level": player_data.get('level') if player_data else 0,
+            "likes": player_data.get('likes') if player_data else 0,
+            "region": player_data.get('region') if player_data else "Unknown",
+            "release_version": player_data.get('release_version') if player_data else "Unknown",
+            "status": status,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        
+        return response_data
+        
+    except Exception as e:
+        print(f"Join guild error: {e}")
+        raise e
+
+# -----------------------------
+# Join Guild Route
+# -----------------------------
+
+@app.route('/join', methods=['GET'])
+def join_guild_custom():
+    """URL: /join?guild_id={gid}&uid={uid}&password={pw}"""
+    guild_id = request.args.get('guild_id')
+    uid = request.args.get('uid')
+    password = request.args.get('password')
+    server_name = 'VN'  # Default server
+    
+    if not guild_id or not uid or not password:
+        return jsonify({"status": "failed", "message": "Missing guild_id, uid, or password"}), 400
+    
+    token, error = get_token_from_uid_password(uid, password)
+    if error:
+        return jsonify({"status": "failed", "message": error}), 400
+    
+    author_uid = decode_author_uid(token)
+    result = join_guild_with_retry(author_uid, guild_id, token, server_name)
+    return jsonify(result)
+
+# -----------------------------
+# Health Check
+# -----------------------------
+
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "healthy", "service": "FreeFire-API"}), 200
