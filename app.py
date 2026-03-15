@@ -13,6 +13,7 @@ import data_pb2
 import uid_generator_pb2
 import my_pb2
 import output_pb2
+import friends_pb2
 from datetime import datetime
 import json
 import time
@@ -212,7 +213,139 @@ def decode_author_uid(token):
         return None
 
 # -----------------------------
-# Get Friends List Function (New)
+# Friends List Functions - From FriendsListAPI
+# -----------------------------
+
+FRIEND_URL_BASE = "https://clientbp.ggpolarbear.com/GetFriend"
+
+FRIEND_KEY = bytes([89,103,38,116,99,37,68,69,117,104,54,37,90,99,94,56])
+FRIEND_IV  = bytes([54,111,121,90,68,114,50,50,69,51,121,99,104,106,77,37])
+
+def encrypt_friend_payload(hex_data: str) -> bytes:
+    """Encrypt payload for GetFriend endpoint"""
+    raw = bytes.fromhex(hex_data)
+    cipher = AES.new(FRIEND_KEY, AES.MODE_CBC, FRIEND_IV)
+    return cipher.encrypt(pad(raw, AES.block_size))
+
+def get_friends_list_from_jwt(jwt_token):
+    """Get friends list using JWT token - Original logic from FriendsListAPI"""
+    if not jwt_token or jwt_token.count(".") != 2:
+        return [], None, "Invalid JWT"
+
+    headers = {
+        "Expect": "100-continue",
+        "Authorization": f"Bearer {jwt_token}",
+        "X-Unity-Version": "2018.4.11f1",
+        "X-GA": "v1 1",
+        "ReleaseVersion": "OB52",
+        "Content-Type": "application/octet-stream",
+        "User-Agent": "Dalvik/2.1.0 (Linux; Android 11)",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip"
+    }
+
+    payload_hex = "080110011001"
+    encrypted_payload = encrypt_friend_payload(payload_hex)
+
+    try:
+        r = requests.post(
+            FRIEND_URL_BASE,
+            headers=headers,
+            data=encrypted_payload,
+            timeout=15,
+            verify=False
+        )
+
+        if r.status_code != 200:
+            return [], None, f"Free Fire server error: {r.status_code}"
+
+        pb = friends_pb2.Friends()
+        pb.ParseFromString(r.content)
+
+        friends_list = []
+        
+        # Extract friends from field_1
+        for entry in pb.field_1:
+            uid = str(entry.ID)
+            name = entry.Name if entry.Name else "unknown"
+            
+            friends_list.append({
+                "uid": uid,
+                "name": name
+            })
+
+        if not friends_list:
+            return [], None, None
+
+        # Last entry is user's own info
+        my_info = friends_list[-1]
+        friends_list = friends_list[:-1]
+
+        return friends_list, my_info, None
+
+    except Exception as e:
+        return [], None, str(e)
+
+
+# -----------------------------
+# Friends List Route - uid/password version
+# -----------------------------
+
+@app.route('/friends', methods=['GET'])
+def get_friends_list_route():
+    """URL: /friends?uid={uid}&password={password}"""
+    uid = request.args.get('uid')
+    password = request.args.get('password')
+
+    if not uid or not password:
+        return jsonify({"status": "failed", "message": "Missing uid or password"}), 400
+
+    # Get token from uid/password
+    token, error = get_token_from_uid_password(uid, password)
+    if error:
+        return jsonify({"status": "failed", "message": error}), 400
+
+    # Use original logic with JWT
+    friends_list, my_info, err = get_friends_list_from_jwt(token)
+    
+    if err:
+        return jsonify({"status": "failed", "message": err}), 500
+
+    return jsonify({
+        "friends_count": len(friends_list),
+        "friends_list": friends_list,
+        "my_info": my_info,
+        "status": "success",
+        "timestamp": int(time.time())
+    })
+
+
+# -----------------------------
+# Friends List Route - JWT token version (Original from FriendsListAPI)
+# -----------------------------
+
+@app.route('/friends/<path:jwt_token>', methods=['GET'])
+def get_friends_list_jwt_route(jwt_token):
+    """URL: /friends/<jwt_token> - Original logic from FriendsListAPI"""
+    friends_list, my_info, err = get_friends_list_from_jwt(jwt_token)
+    
+    if err:
+        return jsonify({
+            "status": "error",
+            "message": err
+        }), 500
+
+    return jsonify({
+        "friends_count": len(friends_list),
+        "friends_list": friends_list,
+        "my_info": my_info,
+        "status": "success",
+        "timestamp": int(time.time())
+    })
+
+
+# -----------------------------
+# Get Friends List Function (Old - GetPlayerSocialNetwork)
 # -----------------------------
 
 def get_friends_list(target_uid, token, server_name=None):
@@ -599,17 +732,18 @@ def join_guild_custom():
     uid = request.args.get('uid')
     password = request.args.get('password')
     server_name = 'VN'  # Default server
-    
+
     if not guild_id or not uid or not password:
         return jsonify({"status": "failed", "message": "Missing guild_id, uid, or password"}), 400
-    
+
     token, error = get_token_from_uid_password(uid, password)
     if error:
         return jsonify({"status": "failed", "message": error}), 400
-    
+
     author_uid = decode_author_uid(token)
     result = join_guild_with_retry(author_uid, guild_id, token, server_name)
     return jsonify(result)
+
 
 # -----------------------------
 # Health Check

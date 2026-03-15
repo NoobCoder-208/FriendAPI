@@ -17,6 +17,7 @@ API quản lý bạn bè và thông tin người chơi Free Fire, được xây 
 | **Xem thông tin** | `/player_info` | Lấy thông tin chi tiết người chơi (nickname, level, region, likes, friends_count) |
 | **Join Guild** | `/join` | Gửi yêu cầu tham gia guild |
 | **Lấy Token** | `/token` | Tạo JWT token để xác thực |
+| **Friends List** | `/friends` | Lấy danh sách bạn bè của tài khoản |
 | **Health Check** | `/health` | Kiểm tra trạng thái server |
 
 ---
@@ -214,7 +215,40 @@ http://localhost:5000/token?uid=123456789&password=matkhau
 
 ---
 
-### 6. Health Check
+### 6. Friends List - Danh sách bạn bè
+
+**Endpoint:** `GET /friends`
+
+**Tham số:**
+
+| Tham số | Bắt buộc | Mô tả |
+|---------|----------|-------|
+| `uid` | ✅ | UID tài khoản của bạn |
+| `password` | ✅ | Mật khẩu tài khoản |
+
+**Ví dụ:**
+```
+http://localhost:5000/friends?uid=123456789&password=matkhau
+```
+
+**Phản hồi:**
+```json
+{
+  "friends_count": 150,
+  "friends_list": [
+    {"uid": "987654321", "name": "Ban1"},
+    {"uid": "111222333", "name": "Ban2"},
+    {"uid": "444555666", "name": "Ban3"}
+  ],
+  "my_info": {"uid": "123456789", "name": "TenNguoiDung"},
+  "status": "success",
+  "timestamp": 1710512345
+}
+```
+
+---
+
+### 7. Health Check
 
 **Endpoint:** `GET /health`
 
@@ -288,6 +322,7 @@ vercel deploy
 | **Protobuf** | Serialization dữ liệu |
 | **PyJWT** | Xử lý JWT token |
 | **urllib3** | HTTP library (disable warnings) |
+| **google-protobuf** | Protobuf library |
 
 ---
 
@@ -299,6 +334,7 @@ FriendAPI/
 ├── protobuf_parser.py     # Protobuf parser utility
 ├── byte.py               # AES encryption/decryption helpers
 ├── data_pb2.py           # Protobuf definitions
+├── friends_pb2.py        # Friends list protobuf
 ├── RemoveFriend_Req_pb2.py
 ├── uid_generator_pb2.py
 ├── requirements.txt      # Dependencies
